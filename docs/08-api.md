@@ -2,7 +2,7 @@
 
 > **Hiện trạng trong repo:** backend là một ứng dụng Node.js duy nhất; frontend dùng **REST + SSE** dưới đây. Các module bán hàng (`backend/src/commerce/*`) được agent gọi trực tiếp. GraphQL ở mục 8.3 là thiết kế cho trường hợp tích hợp với hệ thống GraphQL sẵn có — có thể bọc các module đó khi cần.
 >
-> Endpoint đã có: `GET /api/auth/config`, `POST /api/auth/demo-login`, `POST /api/agent/sessions`, `POST /api/agent/sessions/:id/messages` (SSE), `POST /api/agent/feedback`, `GET /api/checkout/confirmation-requests/:id`, `POST /api/checkout/confirmation-requests/:id/cancel`, `POST /api/checkout/confirm`, `GET /api/agent/sessions` (lịch sử chat), `GET /api/agent/sessions/:id/transcript`, `GET /api/menu` (menu theo danh mục cho trang chủ), `GET /api/me`, `GET /api/cart`, `GET /api/orders`, `GET /api/orders/:id/invoice`, `GET|DELETE /api/me/preferences`, `GET /healthz`.
+> Endpoint đã có: `GET /api/auth/config`, `POST /api/auth/demo-login`, `POST /api/agent/sessions`, `POST /api/agent/sessions/:id/messages` (SSE), `POST /api/agent/feedback`, `GET /api/checkout/confirmation-requests/:id`, `POST /api/checkout/confirmation-requests/:id/cancel`, `POST /api/checkout/confirm`, `GET /api/agent/sessions` (lịch sử chat), `GET /api/agent/sessions/:id/transcript`, `GET /api/menu` (menu theo danh mục cho trang chủ), `GET /api/me`, `GET /api/cart`, `GET /api/orders`, `GET /api/orders/:id/invoice`, `GET|PUT|DELETE /api/me/preferences`, `GET /healthz`.
 
 ## 8.1 Phân chia REST / GraphQL / SSE
 
@@ -66,6 +66,7 @@ event: error               data: {"code":"AGENT_UNAVAILABLE_OVERLOADED","message
 | Method | Path | Mô tả |
 |---|---|---|
 | GET | `/api/me/data-export` | Xuất toàn bộ dữ liệu cá nhân + sở thích (JSON) |
+| PUT | `/api/me/preferences` | Màn hình "私の好み / Sở thích": lưu dị ứng, chế độ ăn (ràng buộc cứng) và sở thích tự nhập `stated` (món thích/tránh, vị, ẩm thực, ngân sách/người, ghi chú). Tăng `version` → agent nhận ngữ cảnh mới ở tin nhắn kế tiếp; xử lý các yêu cầu dị ứng đang chờ từ chat |
 | DELETE | `/api/me/preferences` | Xóa toàn bộ dữ liệu sở thích, embedding, events |
 | PUT | `/api/me/consents` | Cập nhật đồng ý (cá nhân hóa, dữ liệu nhạy cảm) |
 

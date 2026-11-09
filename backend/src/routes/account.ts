@@ -1,9 +1,13 @@
 import { Router } from "express";
+import { z } from "zod";
 import { requireEntraUser } from "../auth/entra.js";
 import { asyncHandler } from "../http/asyncHandler.js";
 import { getCart } from "../commerce/cart.js";
 import { listMenuByCategory } from "../commerce/catalog.js";
-import { deletePreferences, getPreferences, getProfile } from "../commerce/customers.js";
+import {
+  CUISINES, DIETARY, TASTE_TAGS, deletePreferences, getPendingPreferenceChanges, getPreferences, getProfile, savePreferenceSettings,
+} from "../commerce/customers.js";
+import { ALLERGENS } from "../agent/tools.js";
 import { getInvoiceHtml, listOrders } from "../commerce/orders.js";
 import { CommerceError } from "../commerce/errors.js";
 
@@ -37,8 +41,37 @@ accountRouter.get("/orders/:orderId/invoice", asyncHandler(async (req, res) => {
   }
 }));
 
-// APPI: view and erase preference data.
-accountRouter.get("/me/preferences", asyncHandler(async (req, res) => res.json(await getPreferences(req.user!.userId))));
+// "My preferences" screen. Also the APPI view/erase controls for preference data.
+const foodList = z.array(z.string().trim().min(1).max(40)).max(15).transform((a) => [...new Set(a)]);
+const tagList = <T extends readonly [string, ...string[]]>(vals: T) => z.array(z.enum(vals)).max(vals.length).transform((a) => [...new Set(a)]);
+const PreferenceSettingsSchema = z
+  .object({
+    allergens: tagList(ALLERGENS),
+    dietary: tagList(DIETARY),
+    stated: z
+      .object({
+        favorite_foods: foodList,
+        avoid_foods: foodList,
+        taste_like: tagList(TASTE_TAGS),
+        taste_avoid: tagList(TASTE_TAGS),
+        cuisines: tagList(CUISINES),
+        budget_per_person: z.number().int().min(300).max(20000).nullable(),
+        note: z.string().trim().max(300),
+      })
+      .strict()
+      .refine((s) => !s.taste_like.some((t) => s.taste_avoid.includes(t)), { message: "a taste cannot be both liked and avoided" }),
+  })
+  .strict();
+
+accountRouter.get("/me/preferences", asyncHandler(async (req, res) => {
+  const [prefs, pending] = await Promise.all([getPreferences(req.user!.userId), getPendingPreferenceChanges(req.user!.userId)]);
+  res.json({ ...prefs, pending_changes: pending });
+}));
+accountRouter.put("/me/preferences", asyncHandler(async (req, res) => {
+  const parsed = PreferenceSettingsSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ code: "INVALID_INPUT", issues: parsed.error.issues.map((i) => ({ path: i.path.join("."), message: i.message })) });
+  res.json(await savePreferenceSettings(req.user!.userId, parsed.data));
+}));
 accountRouter.delete("/me/preferences", asyncHandler(async (req, res) => {
   await deletePreferences(req.user!.userId);
   res.status(204).end();

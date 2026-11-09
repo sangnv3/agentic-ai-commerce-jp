@@ -53,7 +53,7 @@ const deliverySchema = z.object({ date: dateStr, slot_start: slotStr, address_id
 // ---------- shared helpers ----------
 type Prefs = Awaited<ReturnType<typeof customers.getPreferences>>;
 
-function toSoftProfile(p: Prefs): SoftProfile {
+function toSoftProfile(p: Prefs, extra: { prefer?: string[]; avoid?: string[] } = {}): SoftProfile {
   return {
     likedItems: Object.fromEntries([
       ...p.soft.liked_items.map((i) => [i.item_id, i.weight] as const),
@@ -64,6 +64,11 @@ function toSoftProfile(p: Prefs): SoftProfile {
     taste: p.soft.taste,
     priceRange: p.soft.price_range,
     recentlyEaten: p.soft.recently_eaten,
+    statedTasteLike: p.stated.taste_like,
+    statedTasteAvoid: p.stated.taste_avoid,
+    // The customer's own words plus Claude's menu-language versions of them (e.g. "cá hồi" → "サーモン", "鮭").
+    preferKeywords: [...new Set([...p.stated.favorite_foods, ...(extra.prefer ?? [])])],
+    avoidKeywords: [...new Set([...p.stated.avoid_foods, ...(extra.avoid ?? [])])],
   };
 }
 
@@ -90,7 +95,7 @@ export const TOOLS = {
     definition: {
       name: "get_preferences",
       description:
-        "Get the user's long-term food preference profile: allergens (HARD constraint), dietary restrictions (HARD), liked/disliked items and restaurants with decayed weights, taste tendencies, typical price range. Today's explicit request overrides soft preferences, never allergens or dietary restrictions.",
+        "Get the user's long-term food preference profile: allergens (HARD constraint), dietary restrictions (HARD), liked/disliked items and restaurants with decayed weights, taste tendencies, typical price range, and stated (favorite/avoided foods, tastes, cuisines, budget per person, note the user entered on the preferences screen). Today's explicit request overrides soft preferences, never allergens or dietary restrictions.",
       input_schema: { type: "object", properties: {}, additionalProperties: false },
     },
     schema: z.object({}).strict(),
@@ -266,6 +271,18 @@ export const TOOLS = {
           },
           party_size: { type: "integer", minimum: 1, maximum: 30 },
           limit: { type: "integer", minimum: 1, maximum: 10 },
+          prefer_keywords: {
+            type: "array",
+            maxItems: 10,
+            items: { type: "string", maxLength: 30 },
+            description: "Japanese menu words for the customer's stated favorite foods (customer_context.preferences.stated.favorite_foods), e.g. cá hồi/salmon → サーモン, 鮭. Matching dishes are ranked higher. The stated words themselves are always used too.",
+          },
+          avoid_keywords: {
+            type: "array",
+            maxItems: 10,
+            items: { type: "string", maxLength: 30 },
+            description: "Japanese menu words for the customer's stated avoid_foods, e.g. wasabi → わさび, 山葵. Matching dishes are demoted and reported in preference_conflicts.",
+          },
         },
         required: ["query", "delivery"],
         additionalProperties: false,
@@ -292,6 +309,8 @@ export const TOOLS = {
         delivery: deliverySchema,
         party_size: z.number().int().min(1).max(30).optional(),
         limit: z.number().int().min(1).max(10).default(5),
+        prefer_keywords: z.array(z.string().max(30)).max(10).optional(),
+        avoid_keywords: z.array(z.string().max(30)).max(10).optional(),
       })
       .strict(),
     async run(input, ctx) {
@@ -326,7 +345,7 @@ export const TOOLS = {
         locale: ctx.user.locale,
         query: input.query,
         filters,
-        soft: toSoftProfile(prefs),
+        soft: toSoftProfile(prefs, { prefer: input.prefer_keywords, avoid: input.avoid_keywords }),
         today: { tasteTagsAny: input.filters.taste_tags_any ?? [], category: input.filters.category, servingTemp: input.filters.serving_temp },
         limit: input.limit,
         forbiddenAllergens: allergens,

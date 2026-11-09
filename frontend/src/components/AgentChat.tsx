@@ -61,7 +61,17 @@ const stripUntrusted = (s: string) => s.replace(/<\/?untrusted_data>/g, "");
  * resumeSessionId: reopen a stored conversation (chat history) and continue it.
  * initialMessage : start a new conversation with this request instead of the greeting (from the home page).
  */
-export function AgentChat({ locale = "ja", resumeSessionId, initialMessage }: { locale?: "ja" | "en"; resumeSessionId?: string; initialMessage?: string }) {
+export function AgentChat({
+  locale = "ja",
+  resumeSessionId,
+  initialMessage,
+  onNewChat,
+}: {
+  locale?: "ja" | "en";
+  resumeSessionId?: string;
+  initialMessage?: string;
+  onNewChat?: () => void;
+}) {
   const L = t[locale];
   const apiFetch = useApiFetch();
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -126,6 +136,10 @@ export function AgentChat({ locale = "ja", resumeSessionId, initialMessage }: { 
   return (
     <div className="agent-layout">
       <section className="chat" aria-label={L.title}>
+        <div className="chat__toolbar">
+          <span className="muted small">{resumeSessionId ? (locale === "ja" ? "過去の会話を表示中" : "Viewing a past conversation") : L.title}</span>
+          {onNewChat && <button type="button" onClick={onNewChat} disabled={chat.streaming}>＋ {locale === "ja" ? "新しい会話" : "New chat"}</button>}
+        </div>
 
         <div className="chat__log" aria-live="polite">
           {chat.entries.map((e) => {

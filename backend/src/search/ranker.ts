@@ -41,6 +41,12 @@ export interface SoftProfile {
   taste: Record<string, number>; // e.g. { spicy: -0.6, oily: -0.4 }
   priceRange?: { p25: number; p75: number };
   recentlyEaten: string[]; // item ids in the last 2 days
+  /** Entered by the customer on the preferences screen. */
+  statedTasteLike: string[];
+  statedTasteAvoid: string[];
+  /** Foods the customer likes / wants to avoid, as words to look for in the dish name and description. */
+  preferKeywords: string[];
+  avoidKeywords: string[];
 }
 
 export interface TodayIntent {
@@ -119,7 +125,32 @@ function personalScore(hit: MenuHit, soft: SoftProfile, today: TodayIntent): { s
     x += 0.5 * fit;
   }
   if (soft.recentlyEaten.includes(hit.objectID)) x -= 0.6; // avoid monotony
+
+  // The customer's own statements. Taste tags today's request already decides are left to todayMatch.
+  const likedTags = soft.statedTasteLike.filter((t) => !todayDecides.has(t) && hit.taste_tags.includes(t));
+  const avoidedTags = soft.statedTasteAvoid.filter((t) => !todayDecides.has(t) && hit.taste_tags.includes(t));
+  if (likedTags.length) {
+    x += Math.min(1.2, 0.6 * likedTags.length);
+    reasons.push(...likedTags.map((t) => `stated_taste:${t}`));
+  }
+  if (avoidedTags.length) {
+    x -= 1.5;
+    reasons.push(...avoidedTags.map((t) => `stated_taste_avoid:${t}`));
+  }
+  const favFoods = preferenceHits(hit, soft.preferKeywords);
+  if (favFoods.length) {
+    x += 1.5;
+    reasons.push(...favFoods.map((k) => `stated_favorite:${k}`));
+  }
   return { score: sigmoid(x), reasons };
+}
+
+const norm = (v: string) => v.normalize("NFKC").toLowerCase();
+
+/** Which of the keywords appear in the dish name or description (case/width-insensitive). */
+export function preferenceHits(hit: Pick<MenuHit, "name" | "description">, keywords: string[]): string[] {
+  const text = norm(`${hit.name} ${hit.description ?? ""}`);
+  return keywords.filter((k) => k.trim() && text.includes(norm(k.trim())));
 }
 
 function todayMatch(hit: MenuHit, today: TodayIntent): { score: number; reasons: string[] } {
@@ -141,6 +172,8 @@ export interface RankedItem {
   description: string;
   score: { final: number; relevance: number; personal: number; today: number };
   match_reasons: string[];
+  /** Foods from the customer's avoid list found in this dish. Non-empty = do not pick it unless asked for. */
+  preference_conflicts: string[];
   /** false = the item matches the filters (budget, allergens…) but none of the requested words. */
   query_match: boolean;
 }
@@ -158,16 +191,21 @@ export async function searchAndRank(params: {
 }): Promise<{ results: RankedItem[]; dropped: number }> {
   const hits = await searchIndex(params.locale, params.query, params.filters);
 
+  // An avoided food the customer asks for today ("wasabi sushi") is not held against the results.
+  const avoid = params.soft.avoidKeywords.filter((k) => !norm(params.query).includes(norm(k)));
+
   const scored = hits.map((hit, idx) => {
     // Fixed 30-position window (docs/06 §6.4): with few hits, normalizing by hits.length would make each
     // Algolia position worth a lot and drown out personalization.
     const relevance = 1 - idx / 30;
     const p = personalScore(hit, params.soft, params.today);
     const t = todayMatch(hit, params.today);
-    const final = 0.45 * relevance + 0.35 * p.score + 0.2 * t.score;
+    const conflicts = preferenceHits(hit, avoid);
+    // Strong demotion: an item with a food the customer said they avoid should not be the default pick.
+    const final = 0.45 * relevance + 0.35 * p.score + 0.2 * t.score - (conflicts.length ? 0.35 : 0);
     const reasons = [...p.reasons, ...t.reasons];
     if (params.filters.includes("price_incl_tax <=")) reasons.push("within_budget");
-    return { hit, relevance, personal: p.score, today: t.score, final, reasons };
+    return { hit, relevance, personal: p.score, today: t.score, final, reasons, conflicts };
   });
   scored.sort((a, b) => b.final - a.final);
 
@@ -207,6 +245,7 @@ export async function searchAndRank(params: {
       today: +c.today.toFixed(3),
     },
     match_reasons: [...new Set(c.reasons)],
+    preference_conflicts: c.conflicts,
     // A match on the restaurant name alone (e.g. "寿司" in 寿司 匠 for a miso soup) does not count.
     query_match:
       params.query.trim() === "" ||

@@ -133,6 +133,51 @@ export async function getProfile(userId: string) {
 interface WeightedItem { item_id: string; name: string; weight: number; reason?: string }
 interface WeightedRestaurant { restaurant_id: string; weight: number }
 
+/** Vocabularies shared with the search index (taste_tags, cuisine, dietary_tags). */
+export const TASTE_TAGS = ["light", "low_oil", "hearty", "spicy", "mild", "high_protein", "low_calorie", "low_carb", "vegetable_rich"] as const;
+export const CUISINES = ["japanese", "chinese", "korean", "western", "italian", "ethnic"] as const;
+export const DIETARY = ["vegetarian", "vegan", "halal", "low_carb", "gluten_free"] as const;
+
+/**
+ * Preferences the customer typed in on the "My preferences" screen. Soft: they steer search ranking and the
+ * agent's choice; only allergens/dietary (stored separately) are hard constraints.
+ */
+export interface StatedPreferences {
+  favorite_foods: string[]; // free text, any language: "サーモン", "salmon", "cá hồi"
+  avoid_foods: string[]; // free text: "わさび", "raw onion"
+  taste_like: string[]; // TASTE_TAGS
+  taste_avoid: string[]; // TASTE_TAGS
+  cuisines: string[]; // CUISINES
+  budget_per_person: number | null; // JPY, tax incl.
+  note: string; // free text, e.g. "量は少なめが好き"
+  updated_at: string | null;
+}
+
+const EMPTY_STATED: StatedPreferences = {
+  favorite_foods: [], avoid_foods: [], taste_like: [], taste_avoid: [], cuisines: [], budget_per_person: null, note: "", updated_at: null,
+};
+
+function readStated(soft: Record<string, unknown>): StatedPreferences {
+  return { ...EMPTY_STATED, ...((soft.stated as Partial<StatedPreferences> | undefined) ?? {}) };
+}
+
+const hasStated = (s: StatedPreferences) =>
+  s.favorite_foods.length + s.avoid_foods.length + s.taste_like.length + s.taste_avoid.length + s.cuisines.length > 0 ||
+  s.budget_per_person !== null || s.note !== "";
+
+/** Learned cuisine/taste weights with the customer's own statements on top (a statement beats a learned signal). */
+function mergeStated(learned: { taste: Record<string, number>; cuisines: Record<string, number> }, s: StatedPreferences) {
+  const cuisines = { ...learned.cuisines };
+  for (const c of s.cuisines) cuisines[c] = Math.max(cuisines[c] ?? 0, 0.8);
+  const taste = { ...learned.taste };
+  // The ranker reads taste.spicy and taste.oily; the other tags are scored directly from taste_like/taste_avoid.
+  if (s.taste_like.includes("spicy")) taste.spicy = 0.8;
+  if (s.taste_avoid.includes("spicy")) taste.spicy = -0.9;
+  if (s.taste_like.includes("hearty")) taste.oily = 0.6;
+  if (s.taste_avoid.includes("hearty") || s.taste_like.includes("low_oil")) taste.oily = -0.6;
+  return { cuisines, taste };
+}
+
 export async function getPreferences(userId: string) {
   const p = await profileRow(userId);
   const s = p.soft ?? {};
@@ -141,6 +186,8 @@ export async function getPreferences(userId: string) {
       WHERE o.user_id = $1 AND o.created_at > now() - interval '2 days'`,
     [userId],
   );
+  const stated = readStated(s);
+  const merged = mergeStated({ taste: s.taste ?? {}, cuisines: s.cuisines ?? {} }, stated);
   return {
     version: p.version as number,
     hard_constraints: { allergens: p.allergens as string[], dietary: p.dietary as string[] },
@@ -149,11 +196,64 @@ export async function getPreferences(userId: string) {
       liked_items: (s.liked_items ?? []) as WeightedItem[],
       disliked_items: (s.disliked_items ?? []) as WeightedItem[],
       favorite_restaurants: (s.favorite_restaurants ?? []) as WeightedRestaurant[],
-      taste: (s.taste ?? {}) as Record<string, number>,
-      cuisines: (s.cuisines ?? {}) as Record<string, number>,
+      taste: merged.taste,
+      cuisines: merged.cuisines,
       recently_eaten: recent.rows.map((r) => r.item_id),
     },
+    /** What the customer entered on the preferences screen (soft, but takes priority over learned signals). */
+    stated,
   };
+}
+
+/** Allergen/dietary changes requested in chat, waiting for the customer to confirm on the preferences screen. */
+export async function getPendingPreferenceChanges(userId: string) {
+  const { rows } = await db.query<{ event_id: string; kind: string; subject_id: string | null; user_quote: string | null; created_at: Date }>(
+    `SELECT event_id, kind, subject_id, user_quote, created_at FROM preference_events
+      WHERE user_id = $1 AND status = 'pending_user_confirmation' ORDER BY created_at DESC LIMIT 20`,
+    [userId],
+  );
+  return rows.map((r) => ({ id: `pe_${r.event_id}`, kind: r.kind, subject: r.subject_id, quote: r.user_quote, created_at: r.created_at }));
+}
+
+/**
+ * Save the preferences screen. The customer edits their own allergens/dietary here (the confirmation step for
+ * changes requested in chat), so they are applied directly; pending chat requests are resolved against the result.
+ */
+export async function savePreferenceSettings(
+  userId: string,
+  input: { allergens: string[]; dietary: string[]; stated: Omit<StatedPreferences, "updated_at"> },
+) {
+  const stated: StatedPreferences = { ...input.stated, updated_at: new Date().toISOString() };
+  return tx(async (c) => {
+    const { rows } = await c.query<{ version: number }>(
+      `UPDATE preference_profiles
+          SET allergens = $2, dietary = $3, soft = jsonb_set(soft, '{stated}', $4::jsonb, true),
+              version = version + 1, recomputed_at = now()
+        WHERE user_id = $1 RETURNING version`,
+      [userId, input.allergens, input.dietary, JSON.stringify(stated)],
+    );
+    if (!rows[0]) throw new CommerceError("NOT_FOUND", "user not found");
+
+    // Pending allergen/dietary requests from chat: applied if the saved state now reflects them, else rejected.
+    const pending = await c.query<{ event_id: string; kind: string; subject_id: string | null }>(
+      "SELECT event_id, kind, subject_id FROM preference_events WHERE user_id = $1 AND status = 'pending_user_confirmation'",
+      [userId],
+    );
+    for (const e of pending.rows) {
+      const applied =
+        e.kind === "allergen_add_request" ? input.allergens.includes(e.subject_id ?? "") :
+        e.kind === "allergen_remove_request" ? !input.allergens.includes(e.subject_id ?? "") :
+        e.kind === "dietary_change_request" ? input.dietary.includes(e.subject_id ?? "") : false;
+      await c.query("UPDATE preference_events SET status = $2 WHERE event_id = $1", [e.event_id, applied ? "applied" : "rejected"]);
+    }
+
+    await c.query(
+      `INSERT INTO preference_events (user_id, kind, subject_type, source, user_quote, status)
+       VALUES ($1, 'settings_update', 'note', 'user_edit', $2, 'applied')`,
+      [userId, JSON.stringify({ allergens: input.allergens, dietary: input.dietary, ...input.stated }).slice(0, 1000)],
+    );
+    return { version: rows[0].version, stated };
+  });
 }
 
 /** Compact view given to Claude at the start of a session (no email/phone/card data). */
@@ -174,6 +274,8 @@ export async function getAgentContext(userId: string) {
       dislikes: prefs.soft.disliked_items.map((i: { name: string; reason?: string }) => `${i.name}${i.reason ? `: ${i.reason}` : ""}`),
       taste: prefs.soft.taste,
       price_range: prefs.soft.price_range ?? null,
+      // Entered by the customer on the preferences screen. Absent = nothing entered.
+      ...(hasStated(prefs.stated) ? { stated: { ...prefs.stated, updated_at: undefined } } : {}),
     },
     recent_orders: profile.recentOrders.slice(0, 3),
   };

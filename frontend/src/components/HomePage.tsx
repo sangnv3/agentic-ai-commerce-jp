@@ -25,7 +25,7 @@ const EXAMPLES = {
 };
 
 /** Home: menu by category + entry points into the AI ordering chat. */
-export function HomePage({ locale, onAskAgent }: { locale: "ja" | "en"; onAskAgent: (message?: string) => void }) {
+export function HomePage({ locale, onAskAgent, onOpenPreferences }: { locale: "ja" | "en"; onAskAgent: (message?: string) => void; onOpenPreferences: () => void }) {
   const apiFetch = useApiFetch();
   const [menu, setMenu] = useState<Category[] | null>(null);
   const [active, setActive] = useState<string>("all");
@@ -72,6 +72,10 @@ export function HomePage({ locale, onAskAgent }: { locale: "ja" | "en"; onAskAge
             <button key={ex} type="button" onClick={() => onAskAgent(ex)}>{ex}</button>
           ))}
         </div>
+        <p className="muted small hero__prefs">
+          {ja ? "好きな食材や苦手なものを登録すると、「今日はお寿司」だけで好みに合う一品を選んで注文します。" : "Save your favorite and avoided foods, and “sushi today” is enough for the AI to order one that suits you."}{" "}
+          <button type="button" className="link" onClick={onOpenPreferences}>{ja ? "好みを登録する →" : "Set preferences →"}</button>
+        </p>
       </section>
 
       <nav className="category-nav" aria-label={ja ? "カテゴリー" : "Categories"}>

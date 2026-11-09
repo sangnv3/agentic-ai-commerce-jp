@@ -134,4 +134,4 @@ UI:   POST …/messages {event: checkout_result, confirmation_request_id}
 - Chạy ở local: [LOCAL-DEV.md](LOCAL-DEV.md)
 - Deploy Railway qua GitHub: [DEPLOY-RAILWAY.md](DEPLOY-RAILWAY.md)
 
-Phần còn phải làm để chạy thật (không phải demo): adapter PSP thật (thẻ, PayPay, 3-D Secure, webhook, đối soát), menu thật với đủ dữ liệu dị ứng, App Registration Entra ID, email ACS với domain đã xác thực, xuất hóa đơn PDF, bộ evals cho chất lượng hội thoại, và màn hình "Sở thích của tôi" (API đã có: `GET/DELETE /api/me/preferences`).
+Phần còn phải làm để chạy thật (không phải demo): adapter PSP thật (thẻ, PayPay, 3-D Secure, webhook, đối soát), menu thật với đủ dữ liệu dị ứng, App Registration Entra ID, email ACS với domain đã xác thực, xuất hóa đơn PDF, bộ evals cho chất lượng hội thoại, (màn hình "Sở thích của tôi" đã có: `frontend/src/components/PreferencesPanel.tsx`, API `GET/PUT/DELETE /api/me/preferences`).
