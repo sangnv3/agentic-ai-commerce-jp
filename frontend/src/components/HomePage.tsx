@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { useApiFetch, yen } from "../api/client";
 import { ALLERGEN_JA, CATEGORIES, MANDATORY_ALLERGENS, TAGS } from "../labels";
 import { HeroCarousel, type Slide } from "./HeroCarousel";
+import { HowToOrder } from "./HowToOrder";
 
 interface MenuItem {
   itemId: string;
@@ -79,6 +80,8 @@ export function HomePage({ locale, onAskAgent, onOpenPreferences }: { locale: "j
           <button key={ex} type="button" onClick={() => onAskAgent(ex)}>{ex}</button>
         ))}
       </div>
+
+      <HowToOrder locale={locale} onTry={(message) => onAskAgent(message)} />
 
       <nav className="category-nav" aria-label={ja ? "カテゴリー" : "Categories"}>
         <button type="button" className={active === "all" ? "tab active" : "tab"} onClick={() => setActive("all")}>{ja ? "すべて" : "All"}</button>

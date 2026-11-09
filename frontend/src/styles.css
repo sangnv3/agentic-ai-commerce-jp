@@ -235,3 +235,57 @@ button.link { border: 0; background: none; padding: 0; color: var(--accent); fon
 .ask .primary { padding: 10px 20px; }
 .ask__chips { margin: 8px 0 14px; }
 @media (prefers-color-scheme: dark) { .carousel__dots button:not(.active) { background: rgba(255, 255, 255, 0.35); } }
+
+/* ---------- home: how to order (interactive) ---------- */
+.howto { margin: 6px 0 22px; }
+.howto h2 { font-size: 20px; margin: 0 0 10px; }
+.howto__body { display: grid; grid-template-columns: minmax(240px, 340px) 1fr; gap: 14px; background: var(--surface); border: 1px solid var(--border); border-radius: 20px; padding: 14px; box-shadow: var(--shadow); }
+.howto__steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; align-content: start; }
+.howto__steps button { position: relative; overflow: hidden; width: 100%; display: flex; align-items: center; gap: 12px; text-align: left; border-radius: 14px; padding: 10px 12px; border-color: transparent; background: transparent; }
+.howto__steps button:hover { background: var(--surface-2); }
+.howto__steps button.active { background: var(--accent-soft); border-color: var(--accent); }
+.howto__num { flex: none; width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; font-weight: 700; font-size: 14px; background: var(--surface-2); color: var(--muted); }
+.howto__steps .active .howto__num { background: var(--accent); color: var(--accent-ink); }
+.howto__steps .done .howto__num { background: var(--ok); color: #fff; }
+.howto__label { display: grid; line-height: 1.35; }
+.howto__progress { position: absolute; left: 0; bottom: 0; height: 3px; width: 100%; background: var(--accent); transform-origin: left; animation: howto-progress linear forwards; }
+@keyframes howto-progress { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+
+.howto__screen { display: flex; flex-direction: column; gap: 10px; min-height: 260px; background: var(--surface-2); border-radius: 16px; padding: 16px; }
+.howto__actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: auto; }
+.mock { display: flex; flex-direction: column; gap: 8px; }
+.mock__bubble { max-width: 85%; padding: 8px 12px; border-radius: 14px; font-size: 14px; }
+.mock__bubble--user { align-self: flex-end; background: var(--accent); color: var(--accent-ink); border-top-right-radius: 4px; min-height: 1.6em; }
+.mock__bubble--agent { align-self: flex-start; background: var(--surface); border: 1px solid var(--border); border-top-left-radius: 4px; }
+.mock__caret { display: inline-block; width: 2px; height: 1em; margin-left: 2px; vertical-align: -2px; background: currentColor; animation: caret 1s steps(1) infinite; }
+@keyframes caret { 50% { opacity: 0; } }
+.mock__card { align-self: flex-start; display: flex; align-items: center; gap: 10px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 8px 12px; font-size: 14px; box-shadow: var(--shadow); }
+.mock__card > span:nth-child(2) { display: grid; }
+.mock__emoji { font-size: 28px; }
+.mock__reason { color: var(--accent); font-size: 12px; }
+.mock__confirm, .mock__receipt { align-self: center; width: min(360px, 100%); background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 12px 14px; box-shadow: var(--shadow); font-size: 14px; }
+.mock__row { display: flex; justify-content: space-between; gap: 8px; padding: 4px 0; border-bottom: 1px dashed var(--border); }
+.mock__total { font-weight: 700; font-size: 16px; border-bottom: 0; }
+.mock__pay { position: relative; margin-top: 8px; text-align: center; background: var(--accent); color: var(--accent-ink); font-weight: 700; border-radius: 999px; padding: 9px; animation: pay-press 2.4s 0.8s ease-in-out infinite; }
+@keyframes pay-press { 0%, 70%, 100% { transform: scale(1); } 80% { transform: scale(0.95); } }
+.mock__tap { position: absolute; right: 22%; bottom: -6px; width: 22px; height: 22px; border-radius: 50%; background: rgba(255, 255, 255, 0.6); border: 2px solid var(--text); animation: tap 2.4s 0.8s ease-in-out infinite; }
+@keyframes tap { 0%, 60% { opacity: 0; transform: translate(14px, 14px); } 75%, 85% { opacity: 1; transform: translate(0, 0) scale(0.85); } 100% { opacity: 0; } }
+.mock__receipt { display: grid; justify-items: center; gap: 4px; text-align: center; border-left: 4px solid var(--ok); }
+.mock__check { width: 44px; height: 44px; border-radius: 50%; background: var(--ok); color: #fff; display: grid; place-items: center; font-size: 24px; font-weight: 700; }
+.mock__link { color: var(--accent); font-weight: 600; }
+.pop { animation: pop 0.45s ease both; }
+.pop--2 { animation-delay: 0.5s; }
+@keyframes pop { from { opacity: 0; transform: translateY(8px) scale(0.98); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .pop, .mock__pay, .mock__tap, .mock__caret, .howto__progress { animation: none; }
+  .mock__tap { display: none; }
+}
+@media (max-width: 720px) {
+  .howto__body { grid-template-columns: 1fr; }
+  .howto__steps { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; }
+  .howto__steps button { flex-direction: column; gap: 4px; padding: 8px 4px; text-align: center; }
+  .howto__label .muted { display: none; }
+  .howto__label strong { font-size: 12px; }
+  .howto__num { width: 26px; height: 26px; font-size: 13px; }
+  .howto__screen { min-height: 240px; }
+}
