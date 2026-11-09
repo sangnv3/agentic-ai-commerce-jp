@@ -123,7 +123,7 @@ function DemoLogin({ onToken }: { onToken: (t: string) => void }) {
   return (
     <div className="center-card">
       <h1>🍱 AIご注文アシスタント</h1>
-      <p className="muted">デモ版：サンプル顧客「田中 健太」様としてログインします（えび・かにアレルギー登録済み）。決済はデモで、実際の請求は発生しません。</p>
+      <p className="muted">デモ版：サンプル顧客「Steven」様としてログインします（えび・かにアレルギー登録済み）。決済はデモで、実際の請求は発生しません。</p>
       <form onSubmit={submit} className="login-form">
         <label>
           デモ用パスワード / Demo password

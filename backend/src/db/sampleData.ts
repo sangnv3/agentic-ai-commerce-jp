@@ -1,6 +1,6 @@
 /**
  * Sample restaurants, menu and demo customer template (seeded by db/seed.ts; demo/dev users are copied from USER). Mirrors docs/05-conversation-scripts.md.
- * Every demo customer starts as a copy of 田中 健太 — allergic to shrimp & crab, usually orders lunch at 12:00
+ * Every demo customer starts as a copy of Steven — allergic to shrimp & crab, usually orders lunch at 12:00
  * to the Shibuya office.
  */
 export interface MenuFixture {
@@ -187,9 +187,9 @@ export const MENU: MenuFixture[] = ALL_SEED.map((m, i) => ({
 /** Template profile; each demo customer gets a deep copy (see commerce/customers.ts ensureUser). */
 export const USER = {
   userId: "u_tanaka",
-  displayName: "田中 健太",
-  familyName: "田中",
-  email: "kenta.tanaka@example.co.jp",
+  displayName: "Steven",
+  familyName: "Steven",
+  email: "steven@example.co.jp",
   locale: "ja",
   pointsBalance: 320,
   addresses: [
