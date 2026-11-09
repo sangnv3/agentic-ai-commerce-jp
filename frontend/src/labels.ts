@@ -5,6 +5,20 @@ export const ALLERGEN_JA: Record<string, string> = {
   kiwi: "キウイ", beef: "牛肉", sesame: "ごま", salmon: "さけ", mackerel: "さば", soybean: "大豆", chicken: "鶏肉",
   banana: "バナナ", pork: "豚肉", macadamia: "マカダミア", peach: "もも", yam: "やまいも", apple: "りんご", gelatin: "ゼラチン",
 };
+export const ALLERGEN_EN: Record<string, string> = {
+  shrimp: "Shrimp", crab: "Crab", walnut: "Walnut", wheat: "Wheat", buckwheat: "Buckwheat", egg: "Egg", milk: "Milk", peanut: "Peanut",
+  almond: "Almond", abalone: "Abalone", squid: "Squid", salmon_roe: "Salmon roe", orange: "Orange", cashew: "Cashew",
+  kiwi: "Kiwi", beef: "Beef", sesame: "Sesame", salmon: "Salmon", mackerel: "Mackerel", soybean: "Soy", chicken: "Chicken",
+  banana: "Banana", pork: "Pork", macadamia: "Macadamia", peach: "Peach", yam: "Yam", apple: "Apple", gelatin: "Gelatin",
+};
+export const allergenLabel = (a: string, locale: "ja" | "en") => (locale === "ja" ? ALLERGEN_JA[a] : ALLERGEN_EN[a]) ?? a.replace(/_/g, " ");
+
+export const DIETARY: Record<string, { ja: string; en: string }> = {
+  vegetarian: { ja: "ベジタリアン", en: "Vegetarian" }, vegan: { ja: "ヴィーガン", en: "Vegan" }, halal: { ja: "ハラール", en: "Halal" },
+  low_carb: { ja: "低糖質", en: "Low carb" }, gluten_free: { ja: "グルテンフリー", en: "Gluten free" },
+};
+export const dietaryLabel = (d: string, locale: "ja" | "en") => DIETARY[d]?.[locale] ?? d.replace(/_/g, " ");
+
 /** 特定原材料 (mandatory labelling) — shown in bold. */
 export const MANDATORY_ALLERGENS = new Set(["shrimp", "crab", "walnut", "wheat", "buckwheat", "egg", "milk", "peanut"]);
 

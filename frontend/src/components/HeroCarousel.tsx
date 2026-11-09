@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState, type PointerEvent } from "react";
+import { bannerPhoto } from "../photos";
 
 export interface Slide {
   id: string;
-  emoji: string[];
   title: string;
   sub: string;
   cta: string;
@@ -63,13 +63,11 @@ export function HeroCarousel({ slides, label }: { slides: Slide[]; label: string
               aria-label={`${i + 1} / ${n}`}
               aria-hidden={i !== index}
             >
+              <img className="slide__photo" src={bannerPhoto(s.id)} alt="" draggable={false} loading={i === 0 ? "eager" : "lazy"} />
               <div className="slide__text">
                 <h2>{s.title}</h2>
                 <p>{s.sub}</p>
                 <button type="button" className="primary" tabIndex={i === index ? 0 : -1} onClick={s.onClick}>{s.cta}</button>
-              </div>
-              <div className="slide__art" aria-hidden>
-                {s.emoji.map((e, k) => <span key={k}>{e}</span>)}
               </div>
             </div>
           ))}

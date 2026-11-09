@@ -4,12 +4,14 @@ import { CommerceError } from "./errors.js";
 export interface OptionChoice {
   id: string;
   name: string;
+  nameEn?: string;
   priceDelta: number;
   allergensAdded: string[];
 }
 export interface OptionGroup {
   id: string;
   name: string;
+  nameEn: string | null;
   required: boolean;
   options: OptionChoice[];
 }
@@ -17,8 +19,12 @@ export interface MenuItem {
   itemId: string;
   restaurantId: string;
   restaurantName: string;
+  /** English display names (null = not translated; show the Japanese one). Japanese stays the source of truth. */
+  restaurantNameEn: string | null;
   name: string;
+  nameEn: string | null;
   description: string;
+  descriptionEn: string | null;
   priceInclTax: number;
   taxCategory: "reduced_8" | "standard_10";
   category: string | null;
@@ -40,8 +46,8 @@ export interface MenuItem {
 const timeToMin = (t: string | null, d: number) => (t ? Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5)) : d);
 
 const SELECT_ITEMS = `
-  SELECT m.*, r.name_ja AS restaurant_name,
-         COALESCE((SELECT json_agg(json_build_object('id', o.option_group_id, 'name', o.name_ja, 'required', o.required, 'options', o.options) ORDER BY o.sort_order)
+  SELECT m.*, r.name_ja AS restaurant_name, r.name_en AS restaurant_name_en,
+         COALESCE((SELECT json_agg(json_build_object('id', o.option_group_id, 'name', o.name_ja, 'nameEn', o.name_en, 'required', o.required, 'options', o.options) ORDER BY o.sort_order)
                    FROM menu_item_options o WHERE o.item_id = m.item_id), '[]') AS option_groups
     FROM menu_items m JOIN restaurants r USING (restaurant_id)`;
 
@@ -50,8 +56,11 @@ function mapItem(r: Record<string, any>): MenuItem { // eslint-disable-line @typ
     itemId: r.item_id,
     restaurantId: r.restaurant_id,
     restaurantName: r.restaurant_name,
+    restaurantNameEn: r.restaurant_name_en ?? null,
     name: r.name_ja,
+    nameEn: r.name_en ?? null,
     description: r.description_ja ?? "",
+    descriptionEn: r.description_en ?? null,
     priceInclTax: r.price_incl_tax,
     taxCategory: r.tax_category,
     category: r.category,
@@ -105,6 +114,7 @@ export async function inventory(items: { itemId: string; quantity: number }[]) {
 export function resolveOptions(m: MenuItem, chosen: Record<string, string>) {
   let delta = 0;
   const names: string[] = [];
+  const nameKeys: string[] = []; // "group.choice" of each entry in names (for display in another language)
   const allergens: string[] = [];
   const resolved: Record<string, string> = {};
   for (const g of m.optionGroups) {
@@ -115,12 +125,15 @@ export function resolveOptions(m: MenuItem, chosen: Record<string, string>) {
     resolved[g.id] = o.id;
     delta += o.priceDelta;
     allergens.push(...o.allergensAdded);
-    if (o.priceDelta !== 0 || o.id !== g.options[0]?.id) names.push(o.name);
+    if (o.priceDelta !== 0 || o.id !== g.options[0]?.id) {
+      names.push(o.name);
+      nameKeys.push(`${g.id}.${o.id}`);
+    }
   }
   for (const k of Object.keys(chosen)) {
     if (!m.optionGroups.some((g) => g.id === k)) throw new CommerceError("INVALID_OPTION", `${m.name} has no option group "${k}"`);
   }
-  return { delta, names, allergens, resolved };
+  return { delta, names, nameKeys, allergens, resolved };
 }
 
 // ---------- search without Algolia (local dev / when ALGOLIA_APP_ID is empty) ----------
@@ -169,9 +182,11 @@ export function toSearchHit(m: MenuItem, zones: string[]) {
   return {
     objectID: m.itemId,
     name: m.name,
+    name_en: m.nameEn ?? undefined,
     description: m.description,
     restaurant_id: m.restaurantId,
     restaurant_name: m.restaurantName,
+    restaurant_name_en: m.restaurantNameEn ?? undefined,
     price_incl_tax: m.priceInclTax,
     tax_category: m.taxCategory,
     category: m.category ?? "",
@@ -203,23 +218,33 @@ export async function allSearchRecords() {
 
 const CATEGORY_ORDER = ["sushi", "tempura", "noodles", "rice", "curry", "bento", "salad", "soup", "side", "dessert", "drink"];
 
-/** Menu for the home page, grouped by category (public data only). */
+/**
+ * Menu for the home page, grouped by category (public data only), plus the option labels in both languages
+ * ("group" / "group.choice" → {ja, en}) so the client can show cart and checkout lines in the selected language.
+ */
 export async function listMenuByCategory() {
   const { rows } = await db.query(`${SELECT_ITEMS} ORDER BY m.category, m.price_incl_tax`);
   const items = rows.map(mapItem);
   const groups = new Map<string, ReturnType<typeof publicItem>[]>();
+  const optionNames: Record<string, { ja: string; en: string | null }> = {};
   for (const m of items) {
     const key = m.category ?? "other";
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key)!.push(publicItem(m));
+    for (const g of m.optionGroups) {
+      optionNames[g.id] ??= { ja: g.name, en: g.nameEn };
+      for (const o of g.options) optionNames[`${g.id}.${o.id}`] ??= { ja: o.name, en: o.nameEn ?? null };
+    }
   }
   const rank = (c: string) => (CATEGORY_ORDER.indexOf(c) + 1 || 99);
-  return [...groups.entries()].sort((a, b) => rank(a[0]) - rank(b[0])).map(([category, list]) => ({ category, items: list }));
+  const categories = [...groups.entries()].sort((a, b) => rank(a[0]) - rank(b[0])).map(([category, list]) => ({ category, items: list }));
+  return { categories, optionNames };
 }
 
 function publicItem(m: MenuItem) {
   return {
     itemId: m.itemId, name: m.name, description: m.description, restaurant: m.restaurantName, priceInclTax: m.priceInclTax,
+    nameEn: m.nameEn, descriptionEn: m.descriptionEn, restaurantEn: m.restaurantNameEn,
     allergens: m.allergens, dietary: m.dietary, tasteTags: m.tasteTags, calories: m.calories, isSoldOut: m.isSoldOut,
     servingTemp: m.servingTemp, cuisine: m.cuisine, servingFromMin: m.servingFromMin, servingToMin: m.servingToMin,
   };

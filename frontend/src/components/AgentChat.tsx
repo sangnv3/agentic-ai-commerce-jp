@@ -1,8 +1,11 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
-import { useApiFetch, yen } from "../api/client";
+import { useApiFetch } from "../api/client";
+import { useCart } from "../cart";
+import { useCatalog } from "../catalog";
 import { useAgentStream, type ItemCardData, type OrderReceipt, type TranscriptMessage } from "../hooks/useAgentStream";
 import { CheckoutConfirmation } from "./CheckoutConfirmation";
-import { ALLERGEN_JA } from "../labels";
+import { allergenLabel } from "../labels";
+import { menuPhoto } from "../photos";
 
 const t = {
   ja: {
@@ -60,19 +63,28 @@ const stripUntrusted = (s: string) => s.replace(/<\/?untrusted_data>/g, "");
 /**
  * resumeSessionId: reopen a stored conversation (chat history) and continue it.
  * initialMessage : start a new conversation with this request instead of the greeting (from the home page).
+ * orderItemId    : "Order" pressed on a home-page card — the item goes straight into the cart and the agent asks
+ *                  only for the delivery time and address.
  */
 export function AgentChat({
   locale = "ja",
   resumeSessionId,
   initialMessage,
+  orderItemId,
   onNewChat,
+  onSessionReady,
 }: {
   locale?: "ja" | "en";
   resumeSessionId?: string;
   initialMessage?: string;
+  orderItemId?: string;
   onNewChat?: () => void;
+  /** The conversation's id once known (kept in the URL so a reload reopens it). */
+  onSessionReady?: (sessionId: string) => void;
 }) {
   const L = t[locale];
+  const catalog = useCatalog();
+  const sharedCart = useCart();
   const apiFetch = useApiFetch();
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [input, setInput] = useState("");
@@ -107,9 +119,35 @@ export function AgentChat({
   useEffect(() => {
     if (sessionId && !started.current) {
       started.current = true;
-      void chat.send(initialMessage?.trim() ?? "");
+      if (orderItemId) {
+        const name = catalog.itemName(orderItemId, orderItemId);
+        void chat.orderItem(orderItemId, locale === "ja" ? `「${name}」を注文` : `Order "${name}"`);
+      } else {
+        void chat.send(initialMessage?.trim() ?? "");
+      }
     }
-  }, [sessionId, chat, initialMessage]);
+  }, [sessionId, chat, initialMessage, orderItemId, catalog, locale]);
+  useEffect(() => {
+    if (sessionId) onSessionReady?.(sessionId);
+  }, [sessionId, onSessionReady]);
+
+  // The chat's cart (agent's cart_updated events, cleared after an order) feeds the shared cart: menu badge + cart screen.
+  const firstCart = useRef(true);
+  useEffect(() => {
+    if (firstCart.current) {
+      firstCart.current = false;
+      return;
+    }
+    sharedCart.setCart(chat.cart);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chat.cart]);
+  // An edit on the cart screen invalidated the open payment confirmation on the server: close it here too.
+  const firstEdit = useRef(sharedCart.uiEdits);
+  useEffect(() => {
+    if (sharedCart.uiEdits !== firstEdit.current && chat.confirmationRequestId) chat.closeConfirmation();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sharedCart.uiEdits]);
+
   // Block body on purpose: recent Chrome versions return a Promise from scrollIntoView(), and an effect must not
   // return anything but a cleanup function.
   useEffect(() => {
@@ -164,8 +202,13 @@ export function AgentChat({
                 return (
                   <div key={e.id} className="cards" role="list">
                     {e.items.map((item) => (
-                      <ItemCard key={item.item_id} item={item} locale={locale} inCart={!!chat.cart?.lines.some((l) => l.item.id === item.item_id)}
-                        onChoose={() => chat.send(locale === "ja" ? `「${stripUntrusted(item.name)}」にします` : `I'll take "${stripUntrusted(item.name)}"`)} label={L.choose} allergenLabel={L.allergens} />
+                      <ItemCard key={item.item_id} item={item} locale={locale} inCart={!!sharedCart.cart?.lines.some((l) => l.item.id === item.item_id)}
+                        onChoose={() => {
+                          const jaName = stripUntrusted(item.name);
+                          const shown = catalog.itemName(item.item_id, jaName);
+                          void chat.send(locale === "ja" ? `「${jaName}」にします` : shown === jaName ? `I'll take "${jaName}"` : `I'll take "${shown}" (${jaName})`);
+                        }}
+                        label={L.choose} allergenLabel={L.allergens} />
                     ))}
                   </div>
                 );
@@ -202,13 +245,13 @@ export function AgentChat({
 
       <aside className="mini-cart" aria-label={L.cart}>
         <h2>🛒 {L.cart}</h2>
-        {chat.cart?.lines.map((l) => (
+        {sharedCart.cart?.lines.map((l) => (
           <div key={l.id} className="mini-cart__line">
-            <span>{stripUntrusted(l.item.name)} × {l.quantity}</span>
-            <span>{yen(l.lineTotal)}</span>
+            <span>{catalog.itemName(l.item.id, stripUntrusted(l.item.name))} × {l.quantity}</span>
+            <span>{catalog.money(l.lineTotal)}</span>
           </div>
         ))}
-        {chat.cart && <p className="mini-cart__subtotal">{yen(chat.cart.subtotal)}</p>}
+        {sharedCart.cart && sharedCart.cart.lines.length > 0 && <p className="mini-cart__subtotal">{catalog.money(sharedCart.cart.subtotal)}</p>}
       </aside>
 
       {chat.confirmationRequestId && (
@@ -232,16 +275,17 @@ export function AgentChat({
 
 function ItemCard(props: { item: ItemCardData; locale: "ja" | "en"; inCart: boolean; onChoose: () => void; label: string; allergenLabel: string }) {
   const { item, locale } = props;
+  const catalog = useCatalog();
   const reasons = item.match_reasons.map((r) => REASONS[r]?.[locale]).filter(Boolean).join(" · ");
   return (
     <article className="item-card" role="listitem">
-      {item.image_url && <img src={item.image_url} alt="" loading="lazy" />}
-      <h3>{stripUntrusted(item.name)}</h3>
-      <p className="item-card__meta">{stripUntrusted(item.restaurant.name)}{item.calories ? ` · ${item.calories}kcal` : ""}</p>
-      <p className="item-card__price">{yen(item.price_incl_tax)}{locale === "ja" ? "（税込）" : " (tax incl.)"}</p>
+      <img src={item.image_url ?? menuPhoto(item.item_id)} alt="" loading="lazy" onError={(e) => (e.currentTarget.style.display = "none")} />
+      <h3>{catalog.itemName(item.item_id, stripUntrusted(item.name))}</h3>
+      <p className="item-card__meta">{catalog.restaurantOf(item.item_id, stripUntrusted(item.restaurant.name))}{item.calories ? ` · ${item.calories}kcal` : ""}</p>
+      <p className="item-card__price">{catalog.money(item.price_incl_tax)}{locale === "ja" ? "（税込）" : " (tax incl.)"}</p>
       {reasons && <p className="item-card__reasons">💡 {reasons}</p>}
       <p className="item-card__allergens">
-        {props.allergenLabel}: {item.allergens.map((a) => (locale === "ja" ? ALLERGEN_JA[a] ?? a : a.replace(/_/g, " "))).join(" · ") || "—"}
+        {props.allergenLabel}: {item.allergens.map((a) => allergenLabel(a, locale)).join(" · ") || "—"}
       </p>
       {props.inCart ? <span className="badge">✅ {locale === "ja" ? "カートに追加済" : "In cart"}</span> : <button type="button" onClick={props.onChoose}>{props.label}</button>}
     </article>
@@ -251,6 +295,7 @@ function ItemCard(props: { item: ItemCardData; locale: "ja" | "en"; inCart: bool
 /** Order details after payment: the same content as the confirmation email, from the server's order snapshot. */
 function ReceiptCard({ receipt: r, locale }: { receipt: OrderReceipt; locale: "ja" | "en" }) {
   const ja = locale === "ja";
+  const { lineLabel, money: yen } = useCatalog();
   const time = (iso: string) => iso.slice(11, 16);
   const date = new Date(r.delivery_slot.start).toLocaleDateString(ja ? "ja-JP" : "en-US", { timeZone: "Asia/Tokyo", month: "long", day: "numeric", weekday: "short" });
   return (
@@ -262,10 +307,10 @@ function ReceiptCard({ receipt: r, locale }: { receipt: OrderReceipt; locale: "j
       <table className="summary">
         <tbody>
           {r.lines.map((l, i) => (
-            <tr key={`l${i}`}><td>{l.label}{l.taxRate === 8 ? " ※" : ""} × {l.quantity}</td><td>{yen(l.amount)}</td></tr>
+            <tr key={`l${i}`}><td>{lineLabel(l)}{l.taxRate === 8 ? " ※" : ""} × {l.quantity}</td><td>{yen(l.amount)}</td></tr>
           ))}
           {r.discounts.map((d, i) => (
-            <tr key={`d${i}`}><td>{d.label}{d.taxRate === 8 ? " ※" : ""}</td><td>−{yen(Math.abs(d.amount))}</td></tr>
+            <tr key={`d${i}`}><td>{lineLabel(d)}{d.taxRate === 8 ? " ※" : ""}</td><td>−{yen(Math.abs(d.amount))}</td></tr>
           ))}
           <tr><td>{ja ? "配送料" : "Delivery fee"}</td><td>{yen(r.delivery_fee)}</td></tr>
         </tbody>
@@ -275,8 +320,7 @@ function ReceiptCard({ receipt: r, locale }: { receipt: OrderReceipt; locale: "j
           <li key={b.rate}>{ja ? `${b.rate}%対象 ${yen(b.taxableAmountInclTax)}（内消費税 ${yen(b.tax)}）` : `${b.rate}% items ${yen(b.taxableAmountInclTax)} (incl. tax ${yen(b.tax)})`}</li>
         ))}
       </ul>
-      <p className="summary__total">{ja ? "お支払い金額（税込）" : "Total paid (tax incl.)"} <strong>{yen(r.total)}</strong></p>
-      <dl className="summary__details">
+      <p className="summary__total">{ja ? "お支払い金額（税込）" : "Total paid (tax incl.)"} <strong>{yen(r.total)}</strong></p>      <dl className="summary__details">
         <dt>📅</dt><dd>{date} {time(r.delivery_slot.start)}〜{time(r.delivery_slot.end)}</dd>
         <dt>📍</dt><dd>{r.address_text}</dd>
         <dt>💳</dt><dd>{r.payment_label}</dd>

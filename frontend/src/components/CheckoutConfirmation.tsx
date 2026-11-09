@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { readCsrfCookie, useApiFetch, yen } from "../api/client";
+import { readCsrfCookie, useApiFetch } from "../api/client";
+import { useCatalog, type PricedLine } from "../catalog";
 
 /**
  * HUMAN-IN-THE-LOOP confirmation screen.
@@ -11,8 +12,8 @@ interface Summary {
   cart_id: string;
   cart_version: number;
   total: number;
-  lines: { label: string; quantity?: number; amount: number; taxRate: number }[];
-  discounts: { label: string; amount: number; taxRate: number }[];
+  lines: (PricedLine & { quantity?: number; amount: number; taxRate: number })[];
+  discounts: (PricedLine & { amount: number; taxRate: number })[];
   delivery_fee: number;
   tax_breakdown: { rate: number; taxableAmountInclTax: number; tax: number }[];
   delivery_slot: { start: string; end: string };
@@ -20,6 +21,7 @@ interface Summary {
   payment_method: { payment_method_id: string; label: string };
 }
 
+type Fmt = (n: number) => string;
 type Phase = "loading" | "ready" | "paying" | "requires_action" | "done" | "stale" | "failed" | "expired";
 
 const T = {
@@ -28,13 +30,13 @@ const T = {
     delivery: "配送料",
     total: "合計（税込）",
     reduced: "※は軽減税率（8%）対象",
-    taxLine: (rate: number, amt: number, tax: number) => `${rate}%対象 ${yen(amt)}（内消費税 ${yen(tax)}）`,
+    taxLine: (rate: number, amt: number, tax: number, f: Fmt) => `${rate}%対象 ${f(amt)}（内消費税 ${f(tax)}）`,
     when: "お届け日時",
     where: "お届け先",
     pay: "お支払い",
     change: "変更",
     edit: "内容を変更する",
-    confirm: (total: number) => `🔒 確認して支払う ${yen(total)}`,
+    confirm: (total: number, f: Fmt) => `🔒 確認して支払う ${f(total)}`,
     paying: "処理中…",
     notice: "「確認して支払う」を押すと、上記の金額で決済されます。",
     stale: "内容が変更されました。最新の内容をチャットでご確認ください。",
@@ -48,13 +50,13 @@ const T = {
     delivery: "Delivery fee",
     total: "Total (tax incl.)",
     reduced: "※ reduced tax rate (8%)",
-    taxLine: (rate: number, amt: number, tax: number) => `${rate}% items ${yen(amt)} (incl. tax ${yen(tax)})`,
+    taxLine: (rate: number, amt: number, tax: number, f: Fmt) => `${rate}% items ${f(amt)} (incl. tax ${f(tax)})`,
     when: "Delivery time",
     where: "Address",
     pay: "Payment",
     change: "Change",
     edit: "Edit order",
-    confirm: (total: number) => `🔒 Confirm & Pay ${yen(total)}`,
+    confirm: (total: number, f: Fmt) => `🔒 Confirm & Pay ${f(total)}`,
     paying: "Processing…",
     notice: "Pressing Confirm & Pay charges the amount above.",
     stale: "Your order changed. Please review the latest version in the chat.",
@@ -74,6 +76,7 @@ export function CheckoutConfirmation(props: {
   onResult: (confirmationRequestId: string) => void;
 }) {
   const L = T[props.locale];
+  const { lineLabel, money } = useCatalog();
   const apiFetch = useApiFetch();
   const [summary, setSummary] = useState<Summary | null>(null);
   const [expiresAt, setExpiresAt] = useState<number>(0);
@@ -168,19 +171,19 @@ export function CheckoutConfirmation(props: {
             <table className="summary">
               <tbody>
                 {summary.lines.map((l, i) => (
-                  <tr key={`l${i}`}><td>{l.label}{l.taxRate === 8 ? " ※" : ""}{l.quantity ? ` × ${l.quantity}` : ""}</td><td>{yen(l.amount)}</td></tr>
+                  <tr key={`l${i}`}><td>{lineLabel(l)}{l.taxRate === 8 ? " ※" : ""}{l.quantity ? ` × ${l.quantity}` : ""}</td><td>{money(l.amount)}</td></tr>
                 ))}
                 {summary.discounts.map((d, i) => (
-                  <tr key={`d${i}`}><td>{d.label}{d.taxRate === 8 ? " ※" : ""}</td><td>−{yen(Math.abs(d.amount))}</td></tr>
+                  <tr key={`d${i}`}><td>{lineLabel(d)}{d.taxRate === 8 ? " ※" : ""}</td><td>−{money(Math.abs(d.amount))}</td></tr>
                 ))}
-                <tr><td>{L.delivery}</td><td>{yen(summary.delivery_fee)}</td></tr>
+                <tr><td>{L.delivery}</td><td>{money(summary.delivery_fee)}</td></tr>
               </tbody>
             </table>
             <ul className="tax-breakdown">
-              {summary.tax_breakdown.map((b) => <li key={b.rate}>{L.taxLine(b.rate, b.taxableAmountInclTax, b.tax)}</li>)}
+              {summary.tax_breakdown.map((b) => <li key={b.rate}>{L.taxLine(b.rate, b.taxableAmountInclTax, b.tax, money)}</li>)}
               <li>{L.reduced}</li>
             </ul>
-            <p className="summary__total">{L.total} <strong>{yen(summary.total)}</strong></p>
+            <p className="summary__total">{L.total} <strong>{money(summary.total)}</strong></p>
 
             <dl className="summary__details">
               <dt>📅 {L.when}</dt><dd>{fmtSlot(summary.delivery_slot)} <button type="button" onClick={() => props.onChangeRequested(L.when)}>{L.change}</button></dd>
@@ -193,7 +196,7 @@ export function CheckoutConfirmation(props: {
             <footer>
               <button type="button" onClick={() => props.onChangeRequested(L.edit)} disabled={phase === "paying"}>{L.edit}</button>
               <button type="button" className="primary" onClick={confirmAndPay} disabled={!armed || phase === "paying"}>
-                {phase === "paying" ? L.paying : L.confirm(summary.total)}
+                {phase === "paying" ? L.paying : L.confirm(summary.total, money)}
               </button>
             </footer>
             <small>{L.notice}</small>

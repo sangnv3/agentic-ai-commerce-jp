@@ -6,9 +6,12 @@ import { asyncHandler } from "../http/asyncHandler.js";
 import { rateLimit } from "../http/security.js";
 import { runAgentTurn, type Emit, type TurnInput } from "../agent/loop.js";
 import { appendTranscript, getTranscript, listSessions, loadSession, newSession, saveSession, setSessionOrder, withSessionLock } from "../agent/sessionStore.js";
-import { takeOutcomeForReport } from "../checkout/confirmation.js";
+import { invalidateForUser, takeOutcomeForReport } from "../checkout/confirmation.js";
 import { learnFromReview } from "../jobs/postOrder.js";
 import { orderReceipt } from "../commerce/orders.js";
+import { addToCart, getCart } from "../commerce/cart.js";
+import { getMenuItem, getMenuItems } from "../commerce/catalog.js";
+import { CommerceError } from "../commerce/errors.js";
 
 export const agentRouter = Router();
 agentRouter.use(requireEntraUser);
@@ -41,7 +44,31 @@ const MessageBody = z.union([
   // Sent by the confirmation screen after the button press. Only the id travels from the client;
   // the outcome is read from the server-side record, so the browser cannot forge a "payment succeeded".
   z.object({ event: z.object({ type: z.literal("checkout_result"), confirmation_request_id: z.string() }).strict() }).strict(),
+  // "Order" pressed on a home-page menu card: the backend adds the item to the cart itself (with the usual stock,
+  // allergen and one-restaurant checks), then the agent takes over for the delivery time and address.
+  z.object({ event: z.object({ type: z.literal("home_order"), item_id: z.string().regex(/^itm_[A-Za-z0-9_]{1,40}$/) }).strict() }).strict(),
 ]);
+
+/** Add the home-page item to the cart. Business errors (sold out, allergen, other restaurant…) go to the agent. */
+async function addHomeOrderItem(userId: string, itemId: string, extraAllergens: string[], locale: "ja" | "en") {
+  const m = await getMenuItem(itemId).catch(() => null);
+  if (!m) return null;
+  const item = { item_id: m.itemId, name: m.name, name_en: m.nameEn, restaurant: m.restaurantName, restaurant_name_en: m.restaurantNameEn, price_incl_tax: m.priceInclTax };
+  const shown = locale === "en" ? m.nameEn ?? m.name : m.name;
+  const userText = locale === "en" ? `Order "${shown}"` : `「${shown}」を注文`;
+  try {
+    // "Order" = order this dish now: it replaces an unfinished cart (the agent says what was removed).
+    let dropped: { itemId: string; quantity: number }[] = [];
+    const cart = await addToCart(userId, { itemId: m.itemId, quantity: 1, addedBy: "user", replaceCart: true }, extraAllergens, (d) => (dropped = d));
+    const stale = await invalidateForUser(userId); // an open confirmation screen no longer matches the cart
+    const names = new Map((await getMenuItems(dropped.map((d) => d.itemId))).map((x) => [x.itemId, { name: x.name, name_en: x.nameEn }]));
+    const removed = dropped.map((d) => ({ item_id: d.itemId, quantity: d.quantity, ...names.get(d.itemId) }));
+    return { userText, cart, stale, data: { item, quantity: 1, added_to_cart: true, removed_from_previous_cart: removed, cart } };
+  } catch (e) {
+    if (!(e instanceof CommerceError)) throw e;
+    return { userText, cart: null, stale: null, data: { item, quantity: 1, added_to_cart: false, error: { code: e.code, message: e.message }, cart: await getCart(userId) } };
+  }
+}
 
 /** POST /api/agent/sessions/:id/messages → SSE stream of the agent's reply. */
 agentRouter.post("/sessions/:id/messages", rateLimit("chat", 20, 60), asyncHandler(async (req, res) => {
@@ -52,12 +79,18 @@ agentRouter.post("/sessions/:id/messages", rateLimit("chat", 20, 60), asyncHandl
   if (!body.success) return res.status(400).json({ code: "INVALID_INPUT" });
 
   let input: TurnInput;
-  if ("event" in body.data) {
-    const outcome = await takeOutcomeForReport(body.data.event.confirmation_request_id, user.userId, session.sessionId);
+  let homeOrder: Awaited<ReturnType<typeof addHomeOrderItem>> = null;
+  const ev = "event" in body.data ? body.data.event : null;
+  if (ev?.type === "home_order") {
+    homeOrder = await addHomeOrderItem(user.userId, ev.item_id, session.sessionExtraAllergens, session.locale);
+    if (!homeOrder) return res.status(404).json({ code: "ITEM_NOT_FOUND" });
+    input = { kind: "platform_event", event: "home_order", data: homeOrder.data };
+  } else if (ev?.type === "checkout_result") {
+    const outcome = await takeOutcomeForReport(ev.confirmation_request_id, user.userId, session.sessionId);
     if (!outcome) return res.status(409).json({ code: "NO_OUTCOME" });
     input = { kind: "platform_event", event: `checkout_${outcome.status}`, data: outcome };
   } else {
-    const text = body.data.text.trim();
+    const text = "text" in body.data ? body.data.text.trim() : "";
     // Empty first message = "start": the agent greets using the customer context.
     input = { kind: "user_message", text: text || (session.locale === "ja" ? "（会話開始）" : "(conversation start)") };
   }
@@ -75,7 +108,12 @@ agentRouter.post("/sessions/:id/messages", rateLimit("chat", 20, 60), asyncHandl
     else if (event === "error") rec.data.error = { code: d.code, message: d.message };
   };
 
-  if (input.kind === "user_message" && body.data && "text" in body.data && body.data.text.trim()) {
+  if (homeOrder) {
+    // Shown as the customer's own message in the chat history; the mini cart updates before the agent replies.
+    await appendTranscript(session.sessionId, user.userId, "user", homeOrder.userText);
+    if (homeOrder.cart) sse("cart_updated", homeOrder.cart);
+    if (homeOrder.stale) sse("confirmation_invalidated", { confirmation_request_id: homeOrder.stale, reason: "CART_CHANGED" });
+  } else if (input.kind === "user_message" && body.data && "text" in body.data && body.data.text.trim()) {
     await appendTranscript(session.sessionId, user.userId, "user", body.data.text.trim());
   } else if (input.kind === "platform_event") {
     await appendTranscript(session.sessionId, user.userId, "event", input.event, input.data);

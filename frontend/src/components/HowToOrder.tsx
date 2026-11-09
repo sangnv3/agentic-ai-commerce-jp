@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { menuPhoto } from "../photos";
 
 const STEP_MS = 5000;
 
@@ -163,7 +164,7 @@ export function HowToOrder({ locale, onTry, onOpenPreferences }: { locale: "ja" 
                 <div className="mock__bubble mock__bubble--user">{L.ask}</div>
                 <div className="mock__bubble mock__bubble--agent pop">{L.agent}</div>
                 <div className="mock__card pop pop--2">
-                  <span className="mock__emoji" aria-hidden>🍣</span>
+                  <img className="mock__photo" src={menuPhoto("itm_s11")} alt="" />
                   <span>
                     <strong>{L.item}</strong>
                     <span className="mock__reason">♥ {L.reason}</span>

@@ -263,7 +263,11 @@ export async function getAgentContext(userId: string) {
     family_name: profile.familyName,
     locale: profile.locale,
     habit: profile.habit,
-    addresses: profile.addresses.map((a) => ({ id: a.id, label: a.label, short: `${a.city}${a.street} ${a.building}`.trim() })),
+    // full: same format as the checkout summary's address_text, so the customer sees one consistent address.
+    addresses: profile.addresses.map((a) => ({
+      id: a.id, label: a.label, is_default: a.isDefault,
+      full: `〒${a.postalCode} ${a.prefecture}${a.city}${a.street} ${a.building}`.trim(),
+    })),
     default_payment: profile.paymentMethods.find((p) => p.isDefault)?.label ?? null,
     payment_methods: profile.paymentMethods.map((p) => ({ id: p.id, label: p.label })),
     preferences: {

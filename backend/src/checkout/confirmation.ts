@@ -16,6 +16,15 @@ import { config } from "../config.js";
 // family: 0 → resolve IPv4 and IPv6 (Railway private networking is IPv6-only).
 export const redis = new Redis(config.redisUrl, { family: 0, maxRetriesPerRequest: 3 });
 
+/**
+ * SET that keeps the key's remaining TTL — same as `SET … KEEPTTL`, but also works on Redis < 6.0
+ * (e.g. the Windows build used for local development). Atomic: one Lua script.
+ */
+const SET_KEEP_TTL = `local t = redis.call('PTTL', KEYS[1])
+if t > 0 then return redis.call('SET', KEYS[1], ARGV[1], 'PX', t) end
+return redis.call('SET', KEYS[1], ARGV[1])`;
+const setKeepTtl = (k: string, value: string) => redis.eval(SET_KEEP_TTL, 1, k, value);
+
 export interface CheckoutSummary {
   cart_id: string;
   cart_version: number;
@@ -47,7 +56,7 @@ export async function setOutcome(id: string, outcome: ConfirmationRequest["outco
   const req = await getConfirmationRequest(id);
   if (!req) return;
   req.outcome = outcome;
-  await redis.set(key(id), JSON.stringify(req), "KEEPTTL");
+  await setKeepTtl(key(id), JSON.stringify(req));
 }
 
 /** Returns the outcome once, so the agent reports each checkout result exactly one time. */
@@ -55,7 +64,7 @@ export async function takeOutcomeForReport(id: string, userId: string, sessionId
   const req = await getConfirmationRequest(id);
   if (!req || req.userId !== userId || req.sessionId !== sessionId || !req.outcome || req.outcomeReported) return null;
   req.outcomeReported = true;
-  await redis.set(key(id), JSON.stringify(req), "KEEPTTL");
+  await setKeepTtl(key(id), JSON.stringify(req));
   return req.outcome;
 }
 
@@ -101,7 +110,7 @@ export async function markStatus(id: string, status: ConfirmationRequest["status
   const req = await getConfirmationRequest(id);
   if (!req) return;
   req.status = status;
-  await redis.set(key(id), JSON.stringify(req), "KEEPTTL");
+  await setKeepTtl(key(id), JSON.stringify(req));
 }
 
 /** Called whenever the cart changes (cart_version bump) — invalidates open confirmations. */
@@ -210,6 +219,6 @@ export async function issueConfirmationToken(args: {
     .sign(await getSigningKey());
 
   req.status = "TOKEN_ISSUED";
-  await redis.set(key(req.id), JSON.stringify(req), "KEEPTTL");
+  await setKeepTtl(key(req.id), JSON.stringify(req));
   return { token, request: req };
 }

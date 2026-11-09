@@ -17,6 +17,7 @@ export interface CartLine {
   id: string;
   quantity: number;
   lineTotal: number;
+  unitPriceInclTax?: number;
   item: { id: string; name: string };
   options?: Record<string, string>;
 }
@@ -39,8 +40,9 @@ export type ChatEntry =
 export interface OrderReceipt {
   order_id: string;
   placed_at: string;
-  lines: { label: string; quantity: number; amount: number; taxRate: number }[];
-  discounts: { label: string; amount: number; taxRate: number }[];
+  // item_id / option_keys / coupon_code: orders placed before the English menu was added do not have them.
+  lines: { label: string; item_id?: string; option_keys?: string[]; quantity: number; amount: number; taxRate: number }[];
+  discounts: { label: string; coupon_code?: string; amount: number; taxRate: number }[];
   delivery_fee: number;
   tax_breakdown: { rate: number; taxableAmountInclTax: number; tax: number }[];
   total: number;
@@ -124,13 +126,19 @@ export function useAgentStream(sessionId: string | null) {
     })();
   }, [sessionId, apiFetch]);
 
-  /** Stream one agent turn. `payload` is either a chat text or a checkout-result event reference. */
+  /**
+   * Stream one agent turn. `payload` is a chat text or a platform event reference (checkout result, home-page order).
+   * `shown` = the customer's bubble for an event (e.g. "「サーモン握り」を注文").
+   */
   const run = useCallback(
-    async (payload: { text: string } | { event: { type: "checkout_result"; confirmation_request_id: string } }) => {
+    async (
+      payload: { text: string } | { event: { type: "checkout_result"; confirmation_request_id: string } | { type: "home_order"; item_id: string } },
+      shown?: string,
+    ) => {
       if (!sessionId || busy.current) return;
       busy.current = true;
       const assistantId = nextId();
-      const text = "text" in payload ? payload.text : "";
+      const text = "text" in payload ? payload.text : shown ?? "";
       if ("text" in payload) last.current = payload;
       setLastFailed(false);
       setState((s) => ({
@@ -173,6 +181,11 @@ export function useAgentStream(sessionId: string | null) {
     (confirmationRequestId: string) => run({ event: { type: "checkout_result", confirmation_request_id: confirmationRequestId } }),
     [run],
   );
+  /** "Order" on a home-page card: the server adds the item to the cart, then the agent asks for time and address. */
+  const orderItem = useCallback(
+    (itemId: string, shown: string) => run({ event: { type: "home_order", item_id: itemId } }, shown),
+    [run],
+  );
   const closeConfirmation = useCallback(() => setState((s) => ({ ...s, confirmationRequestId: null })), []);
 
   /** Show a stored conversation (chat history) before continuing it. */
@@ -201,7 +214,7 @@ export function useAgentStream(sessionId: string | null) {
     setState((s) => ({ ...s, entries }));
   }, []);
 
-  return { ...state, send, reportCheckout, closeConfirmation, retry, hydrate, lastFailed: lastFailed || !!state.error };
+  return { ...state, send, reportCheckout, orderItem, closeConfirmation, retry, hydrate, lastFailed: lastFailed || !!state.error };
 }
 
 function reduce(s: AgentStreamState, event: string, data: unknown, assistantId: string): AgentStreamState {

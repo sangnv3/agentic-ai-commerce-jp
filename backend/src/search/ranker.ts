@@ -7,9 +7,11 @@ import { localSearch } from "../commerce/catalog.js";
 export interface MenuHit {
   objectID: string;
   name: string;
+  name_en?: string;
   description?: string;
   restaurant_id: string;
   restaurant_name: string;
+  restaurant_name_en?: string;
   price_incl_tax: number;
   tax_category: "reduced_8" | "standard_10";
   category: string;
@@ -162,7 +164,9 @@ function todayMatch(hit: MenuHit, today: TodayIntent): { score: number; reasons:
 export interface RankedItem {
   item_id: string;
   name: string;
-  restaurant: { restaurant_id: string; name: string };
+  /** English display name, only for an English-speaking customer (so Claude names the dish like the card does). */
+  name_en?: string;
+  restaurant: { restaurant_id: string; name: string; name_en?: string };
   price_incl_tax: number;
   tax_category: string;
   allergens: string[];
@@ -227,10 +231,16 @@ export async function searchAndRank(params: {
     return allergens !== undefined && !allergens.some((a) => forbidden.has(a));
   });
 
+  const en = params.locale === "en";
   const results: RankedItem[] = safe.slice(0, params.limit).map((c) => ({
     item_id: c.hit.objectID,
     name: wrapUntrusted(c.hit.name, 80),
-    restaurant: { restaurant_id: c.hit.restaurant_id, name: wrapUntrusted(c.hit.restaurant_name, 60) },
+    ...(en && c.hit.name_en ? { name_en: wrapUntrusted(c.hit.name_en, 80) } : {}),
+    restaurant: {
+      restaurant_id: c.hit.restaurant_id,
+      name: wrapUntrusted(c.hit.restaurant_name, 60),
+      ...(en && c.hit.restaurant_name_en ? { name_en: wrapUntrusted(c.hit.restaurant_name_en, 60) } : {}),
+    },
     price_incl_tax: c.hit.price_incl_tax,
     tax_category: c.hit.tax_category,
     allergens: truth[c.hit.objectID],

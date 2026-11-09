@@ -31,6 +31,8 @@ interface LineRow {
   added_by: string;
 }
 
+/** Same limit as the cart screen and the agent's update_cart (quantity 1–20 per line). */
+export const MAX_LINE_QUANTITY = 20;
 const jstDate = (d: Date) => new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Tokyo" }).format(d);
 const jstHHMM = (d: Date) => new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Tokyo", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(d);
 
@@ -106,7 +108,17 @@ export async function getCart(userId: string) {
   return rows[0] ? cartView(db, rows[0]) : null;
 }
 
-export async function addToCart(userId: string, input: { itemId: string; quantity: number; options?: Record<string, string>; note?: string; addedBy?: string }, extraAllergens: string[] = []) {
+/**
+ * replaceCart: the item becomes the whole cart ("Order" on a home-page card = order this dish now). Earlier lines
+ * and the coupon are dropped only after the stock/allergen checks pass, in the same transaction.
+ * `onReplaced` receives the dropped lines (item ids) so the caller can tell the customer.
+ */
+export async function addToCart(
+  userId: string,
+  input: { itemId: string; quantity: number; options?: Record<string, string>; note?: string; addedBy?: string; replaceCart?: boolean },
+  extraAllergens: string[] = [],
+  onReplaced?: (dropped: { itemId: string; quantity: number }[]) => void,
+) {
   const { forbidden, dietary } = await constraints(userId, extraAllergens);
   return tx(async (c) => {
     const cart = await activeCart(c, userId);
@@ -114,15 +126,32 @@ export async function addToCart(userId: string, input: { itemId: string; quantit
     const opt = resolveOptions(m, input.options ?? {});
     checkStock(m, input.quantity);
     checkAllergens(m, opt.allergens, forbidden, dietary);
-    const current = await lines(c, cart.cart_id);
+    let current = await lines(c, cart.cart_id);
+    if (input.replaceCart && current.length) {
+      await c.query("DELETE FROM cart_lines WHERE cart_id = $1", [cart.cart_id]);
+      await c.query("UPDATE carts SET coupon_code = NULL WHERE cart_id = $1", [cart.cart_id]);
+      cart.coupon_code = null;
+      onReplaced?.(current.map((l) => ({ itemId: l.item_id, quantity: l.quantity })));
+      current = [];
+    }
     if (cart.restaurant_id && current.length && cart.restaurant_id !== m.restaurantId) {
       throw new CommerceError("DIFFERENT_RESTAURANT", "One order = one restaurant. Remove the current items first or choose from the same restaurant.");
     }
-    await c.query(
-      `INSERT INTO cart_lines (cart_line_id, cart_id, item_id, quantity, options, unit_price_incl_tax, tax_category, note, added_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-      [`ln_${randomUUID().slice(0, 8)}`, cart.cart_id, m.itemId, input.quantity, JSON.stringify(opt.resolved), m.priceInclTax + opt.delta, m.taxCategory, input.note ?? null, input.addedBy ?? "agent"],
-    );
+    // Same dish with the same options (and no special note) → one line with a higher quantity, not a second line.
+    const key = (o: Record<string, string>) => JSON.stringify(Object.entries(o).sort(([a], [b]) => a.localeCompare(b)));
+    const same = input.note ? undefined : current.find((l) => l.item_id === m.itemId && !l.note && key(l.options) === key(opt.resolved));
+    if (same) {
+      const quantity = same.quantity + input.quantity;
+      if (quantity > MAX_LINE_QUANTITY) throw new CommerceError("QUANTITY_LIMIT", `At most ${MAX_LINE_QUANTITY} of one dish per order`);
+      checkStock(m, quantity);
+      await c.query("UPDATE cart_lines SET quantity = $2 WHERE cart_line_id = $1", [same.cart_line_id, quantity]);
+    } else {
+      await c.query(
+        `INSERT INTO cart_lines (cart_line_id, cart_id, item_id, quantity, options, unit_price_incl_tax, tax_category, note, added_by)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+        [`ln_${randomUUID().slice(0, 8)}`, cart.cart_id, m.itemId, input.quantity, JSON.stringify(opt.resolved), m.priceInclTax + opt.delta, m.taxCategory, input.note ?? null, input.addedBy ?? "agent"],
+      );
+    }
     await c.query("UPDATE carts SET restaurant_id = $2 WHERE cart_id = $1", [cart.cart_id, m.restaurantId]);
     await bump(c, cart);
     return cartView(c, cart);
@@ -229,11 +258,15 @@ export async function computeSummary(c: Tx | typeof db, cart: CartRow) {
   const summaryLines = ls.map((l) => {
     const m = items.find((i) => i.itemId === l.item_id)!;
     const opt = resolveOptions(m, l.options);
-    return { label: opt.names.length ? `${m.name}（${opt.names.join("・")}）` : m.name, quantity: l.quantity, amount: l.unit_price_incl_tax * l.quantity, taxRate: l.tax_category === "reduced_8" ? 8 : 10 };
+    // label (Japanese) is what the invoice prints; item_id + option_keys let the client show it in another language.
+    return {
+      label: opt.names.length ? `${m.name}（${opt.names.join("・")}）` : m.name, item_id: m.itemId, option_keys: opt.nameKeys,
+      quantity: l.quantity, amount: l.unit_price_incl_tax * l.quantity, taxRate: l.tax_category === "reduced_8" ? 8 : 10,
+    };
   });
   const subtotal = summaryLines.reduce((s, l) => s + l.amount, 0);
   const coupon = cart.coupon_code ? COUPONS[cart.coupon_code] : undefined;
-  const discounts = coupon && subtotal >= coupon.minSubtotal ? [{ label: coupon.label, amount: -coupon.discount, taxRate: 8 }] : [];
+  const discounts = coupon && subtotal >= coupon.minSubtotal ? [{ label: coupon.label, coupon_code: cart.coupon_code!, amount: -coupon.discount, taxRate: 8 }] : [];
   const tax = computeTax([...summaryLines, ...discounts, { amount: zone.fee, taxRate: 10 }].map((x) => ({ amountInclTax: x.amount, taxRate: x.taxRate as 8 | 10 })));
   const pm = (await c.query("SELECT * FROM payment_methods WHERE payment_method_id = $1", [cart.payment_method_id])).rows[0];
   const date = cart.delivery_date;

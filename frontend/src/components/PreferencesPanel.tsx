@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent, type KeyboardEvent } from "react";
 import { useApiFetch } from "../api/client";
-import { ALLERGEN_JA, MANDATORY_ALLERGENS, TAGS } from "../labels";
+import { ALLERGEN_EN, ALLERGEN_JA, DIETARY, MANDATORY_ALLERGENS, TAGS } from "../labels";
 
 interface Stated {
   favorite_foods: string[];
@@ -28,11 +28,6 @@ const CUISINES: Record<string, { ja: string; en: string }> = {
   japanese: { ja: "和食", en: "Japanese" }, chinese: { ja: "中華", en: "Chinese" }, korean: { ja: "韓国料理", en: "Korean" },
   western: { ja: "洋食", en: "Western" }, italian: { ja: "イタリアン", en: "Italian" }, ethnic: { ja: "エスニック", en: "Ethnic" },
 };
-const DIETARY: Record<string, { ja: string; en: string }> = {
-  vegetarian: { ja: "ベジタリアン", en: "Vegetarian" }, vegan: { ja: "ヴィーガン", en: "Vegan" }, halal: { ja: "ハラール", en: "Halal" },
-  low_carb: { ja: "低糖質", en: "Low carb" }, gluten_free: { ja: "グルテンフリー", en: "Gluten free" },
-};
-const ALLERGEN_EN: Record<string, string> = { salmon_roe: "salmon roe" };
 
 const toggle = (list: string[], v: string) => (list.includes(v) ? list.filter((x) => x !== v) : [...list, v]);
 

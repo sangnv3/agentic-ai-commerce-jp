@@ -1,5 +1,6 @@
 import type { UserContext } from "../auth/entra.js";
 import { getAgentContext } from "../commerce/customers.js";
+import { getCart } from "../commerce/cart.js";
 import { FX_JPY_PER_UNIT } from "../commerce/settings.js";
 import { config } from "../config.js";
 import { charge } from "../llm/budget.js";
@@ -39,6 +40,16 @@ export async function contextBlocksForTurn(session: AgentSession, user: UserCont
   if (session.messages.length === 0 || ctx.preferences.version !== session.preferenceVersionSent) {
     blocks.push(renderCustomerContext(ctx));
     session.preferenceVersionSent = ctx.preferences.version;
+  }
+  // The active cart at the start of the session, and again whenever it changed outside the chat (the cart screen
+  // lets the customer change quantities or remove dishes) — so Claude never works from a stale cart.
+  const cart = await getCart(user.userId);
+  const version = cart?.lines.length ? cart.version : null;
+  if (cart?.lines.length && (session.messages.length === 0 || version !== (session.cartVersionSeen ?? null))) {
+    const lines = cart.lines.map((l) => ({ line_id: l.id, item_id: l.item.id, name: l.item.name, quantity: l.quantity, options: l.options, line_total: l.lineTotal }));
+    blocks.push(`<cart_state cart_version="${cart.version}">${JSON.stringify({ lines, subtotal: cart.subtotal })}</cart_state>`);
+  } else if (!cart?.lines.length && session.cartVersionSeen != null && session.messages.length > 0) {
+    blocks.push(`<cart_state>empty</cart_state>`);
   }
   return blocks;
 }

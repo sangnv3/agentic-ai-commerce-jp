@@ -10,6 +10,7 @@ import { sanitizeUserChat } from "./sanitize.js";
 import { contextBlocksForTurn, maybeSummarize } from "./context.js";
 import { classifyIntent } from "./lightTasks.js";
 import { saveSession, type AgentSession } from "./sessionStore.js";
+import { getCart } from "../commerce/cart.js";
 
 export type Emit = (event: string, data: unknown) => void;
 
@@ -173,6 +174,8 @@ export async function runAgentTurn(session: AgentSession, user: UserContext, inp
     repairHistory(messages);
   } finally {
     session.sessionExtraAllergens = [...ctxAllergens];
+    const cartNow = await getCart(user.userId).catch(() => null);
+    session.cartVersionSeen = cartNow?.lines.length ? cartNow.version : null; // same rule as contextBlocksForTurn
     await saveSession(session);
     emit("message_end", { turn: session.turnIndex });
   }

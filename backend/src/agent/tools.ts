@@ -647,6 +647,8 @@ export async function executeTool(name: string, rawInput: unknown, ctx: ToolCont
     return { result, mutatesCart: Boolean(def.mutatesCart) };
   } catch (e) {
     if (e instanceof CommerceError) return { result: fail(e.code, e.message, e.details ?? {}), mutatesCart: false };
+    // Unexpected failure: the model only gets a generic message, so keep the real cause in the server log.
+    console.error(`[tool ${resolved}] unexpected error`, { userId: ctx.user.userId, sessionId: ctx.sessionId, input: parsed.data }, e);
     return { result: fail("INTERNAL_ERROR", "Temporary error, try again or use another option"), mutatesCart: false };
   }
 }

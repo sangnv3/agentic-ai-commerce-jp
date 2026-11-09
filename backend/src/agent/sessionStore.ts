@@ -22,6 +22,8 @@ export interface AgentSession {
   lastInputTokens: number;
   /** Preference profile version last given to Claude, to re-send the summary only when it changes. */
   preferenceVersionSent: number | null;
+  /** Cart version at the end of the last turn; a different version later = edited outside the chat (cart screen). */
+  cartVersionSeen?: number | null;
   sessionExtraAllergens: string[];
   totals: { inputTokens: number; outputTokens: number; costUsd: number };
 }
