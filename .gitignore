@@ -1,0 +1,17 @@
+# dependencies & builds
+node_modules/
+dist/
+*.tsbuildinfo
+
+# secrets — never commit
+.env
+.env.*
+!.env.example
+!.env.dev.example
+**/dev/keys/
+*.pem
+
+# local artifacts
+**/dev/out/
+.DS_Store
+npm-debug.log*
