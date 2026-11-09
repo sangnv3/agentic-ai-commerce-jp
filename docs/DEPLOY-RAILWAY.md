@@ -5,7 +5,7 @@ Kết quả: **1 service** (image Docker gồm frontend React + backend Node.js)
 ```
 GitHub (main) ──push──► Railway
                           ├─ app (Dockerfile)  ← frontend/dist + backend/dist, cổng $PORT, /healthz
-                          │    pre-deploy: npm run predeploy  (migrate DB + nạp dữ liệu mẫu nếu bật)
+                          │    khi khởi động: migrate DB (+ nạp dữ liệu mẫu nếu SEED_SAMPLE_DATA=true)
                           ├─ Postgres
                           └─ Redis
 ```

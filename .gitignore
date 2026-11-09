@@ -15,3 +15,6 @@ dist/
 **/dev/out/
 .DS_Store
 npm-debug.log*
+
+# Vite dependency cache
+.vite/

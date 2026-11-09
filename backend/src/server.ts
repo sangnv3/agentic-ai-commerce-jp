@@ -10,6 +10,8 @@ import { config } from "./config.js";
 import { csrfCookie, securityHeaders } from "./http/security.js";
 import { redis } from "./checkout/confirmation.js";
 import { db } from "./db/pool.js";
+import { runMigrations } from "./db/migrations.js";
+import { seedSampleData } from "./db/sampleSeed.js";
 
 const app = express();
 app.disable("x-powered-by");
@@ -51,6 +53,11 @@ app.use((err: unknown, _req: express.Request, res: express.Response, _next: expr
   res.status(code && /^[A-Z_]+$/.test(code) ? 409 : 500).json({ code: code ?? "INTERNAL_ERROR" });
 });
 process.on("unhandledRejection", (reason) => console.error("[backend] unhandled rejection:", reason));
+
+// Schema (and sample data when enabled) are applied before accepting traffic — safe with several instances
+// (advisory lock) and independent of the hosting platform's pre-deploy hooks.
+await runMigrations((m) => console.log(m));
+if (process.env.SEED_SAMPLE_DATA === "true") await seedSampleData();
 
 const server = app.listen(config.port, () => {
   console.log(`backend listening on :${config.port} (auth: ${config.authMode}${config.devMode ? ", DEV_MODE" : ""}, web: ${webDist || "not served"})`);
