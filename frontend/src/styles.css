@@ -248,6 +248,7 @@ button.link { border: 0; background: none; padding: 0; color: var(--accent); fon
 .howto__steps .active .howto__num { background: var(--accent); color: var(--accent-ink); }
 .howto__steps .done .howto__num { background: var(--ok); color: #fff; }
 .howto__label { display: grid; line-height: 1.35; }
+.howto__short { display: none; }
 .howto__progress { position: absolute; left: 0; bottom: 0; height: 3px; width: 100%; background: var(--accent); transform-origin: left; animation: howto-progress linear forwards; }
 @keyframes howto-progress { from { transform: scaleX(0); } to { transform: scaleX(1); } }
 
@@ -263,7 +264,7 @@ button.link { border: 0; background: none; padding: 0; color: var(--accent); fon
 .mock__card > span:nth-child(2) { display: grid; }
 .mock__emoji { font-size: 28px; }
 .mock__reason { color: var(--accent); font-size: 12px; }
-.mock__confirm, .mock__receipt { align-self: center; width: min(360px, 100%); background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 12px 14px; box-shadow: var(--shadow); font-size: 14px; }
+.mock__confirm, .mock__receipt, .mock__prefs { align-self: center; width: min(360px, 100%); background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 12px 14px; box-shadow: var(--shadow); font-size: 14px; }
 .mock__row { display: flex; justify-content: space-between; gap: 8px; padding: 4px 0; border-bottom: 1px dashed var(--border); }
 .mock__total { font-weight: 700; font-size: 16px; border-bottom: 0; }
 .mock__pay { position: relative; margin-top: 8px; text-align: center; background: var(--accent); color: var(--accent-ink); font-weight: 700; border-radius: 999px; padding: 9px; animation: pay-press 2.4s 0.8s ease-in-out infinite; }
@@ -282,10 +283,23 @@ button.link { border: 0; background: none; padding: 0; color: var(--accent); fon
 }
 @media (max-width: 720px) {
   .howto__body { grid-template-columns: 1fr; }
-  .howto__steps { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; }
+  .howto__steps { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 2px; }
+  .howto__label strong { word-break: keep-all; overflow-wrap: anywhere; }
   .howto__steps button { flex-direction: column; gap: 4px; padding: 8px 4px; text-align: center; }
   .howto__label .muted { display: none; }
-  .howto__label strong { font-size: 12px; }
+  .howto__label strong { font-size: 11px; line-height: 1.3; }
+  .howto__icon { display: none; }
+  .howto__long:has(+ .howto__short) { display: none; }
+  .howto__short { display: inline; }
+  .howto__steps button { padding: 8px 2px; }
   .howto__num { width: 26px; height: 26px; font-size: 13px; }
   .howto__screen { min-height: 240px; }
 }
+.mock__prefs { display: grid; gap: 2px; }
+.mock__prefrow { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px dashed var(--border); }
+.mock__prefrow > span:last-child { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; }
+.mock__chip { font-size: 13px; border-radius: 999px; padding: 1px 10px; }
+.mock__chip--like { background: var(--accent-soft); }
+.mock__chip--avoid { background: var(--surface-2); text-decoration: line-through; text-decoration-color: var(--danger); }
+.mock__chip--allergy { border: 1px solid var(--danger); color: var(--danger); }
+.mock__saved { justify-self: end; margin-top: 6px; color: var(--ok); font-weight: 700; font-size: 13px; }
