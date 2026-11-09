@@ -28,16 +28,40 @@ function initialLocale(): "ja" | "en" {
 }
 
 /**
- * The open tab lives in the URL hash, so a reload (F5) or the browser's back button keeps the user where they were:
- * #/orders, #/history, #/preferences, #/cart, #/chat/<session id> (the conversation is reopened), #/ = home.
+ * The open tab lives in the URL path, so a reload (F5) or the browser's back button keeps the user where they were:
+ * /orders, /history, /preferences, /cart, /chat, / = home. The open conversation's id is kept in sessionStorage
+ * (per browser tab), so /chat reopens it after a reload without putting the id in the URL.
+ * Both servers answer any non-/api path with the app (Vite's SPA fallback; the backend's catch-all in production).
  */
-function parseHash(hash: string): { view: View; sessionId?: string } {
-  const [name, id] = hash.replace(/^#\/?/, "").split("/");
-  const view = (VIEWS as string[]).includes(name) ? (name as View) : "home";
+function parsePath(path: string): { view: View; sessionId?: string } {
+  const [name, id] = path.replace(/^\/+/, "").split("/");
+  const view = (VIEWS as string[]).includes(name) && name !== "home" ? (name as View) : "home";
+  // Older links carried the id (/chat/cs_…): still honored, then the URL is shortened to /chat.
   return view === "chat" && id && /^cs_[\w-]{1,80}$/.test(id) ? { view, sessionId: id } : { view };
 }
-const hashFor = (view: View, sessionId: string | null) =>
-  view === "home" ? "#/" : view === "chat" && sessionId ? `#/chat/${sessionId}` : `#/${view}`;
+const pathFor = (view: View) => (view === "home" ? "/" : `/${view}`);
+
+const CHAT_KEY = "chatSessionId";
+function storedChat(): string | undefined {
+  try {
+    return sessionStorage.getItem(CHAT_KEY) ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+function storeChat(id: string | null) {
+  try {
+    if (id) sessionStorage.setItem(CHAT_KEY, id);
+    else sessionStorage.removeItem(CHAT_KEY);
+  } catch {
+    /* storage unavailable: the chat simply starts fresh after a reload */
+  }
+}
+
+/** Old links used the hash (#/orders): move them to the path once, before the first render. */
+function migrateHashUrl() {
+  if (window.location.hash.startsWith("#/")) window.history.replaceState(null, "", window.location.hash.slice(1) || "/");
+}
 
 export function App() {
   const [locale, setLocale] = useState<"ja" | "en">(initialLocale);
@@ -62,7 +86,11 @@ export function App() {
 function Shell({ locale, setLocale }: { locale: "ja" | "en"; setLocale: (l: "ja" | "en") => void }) {
   const { mode, signOut } = useAuth();
   const cart = useCart();
-  const start = parseHash(window.location.hash);
+  const [start] = useState(() => {
+    migrateHashUrl();
+    const r = parsePath(window.location.pathname);
+    return r.view === "chat" ? { ...r, sessionId: r.sessionId ?? storedChat() } : r;
+  });
   const [view, setView] = useState<View>(start.view);
   // null until the first chat is opened; the chat stays mounted while browsing other tabs.
   const [chat, setChat] = useState<ChatTarget | null>(start.view === "chat" ? { key: 1, resumeSessionId: start.sessionId } : null);
@@ -80,29 +108,33 @@ function Shell({ locale, setLocale }: { locale: "ja" | "en"; setLocale: (l: "ja"
     setLocale(locale === "ja" ? "en" : "ja");
   };
 
-  // view → URL. Filling in the chat's session id replaces the entry; any other change adds one (back button).
+  // The open conversation survives a reload of this tab (see storedChat).
   useEffect(() => {
-    const target = hashFor(view, chatSessionId);
-    if (window.location.hash === target) return;
-    const sameChat = view === "chat" && parseHash(window.location.hash).view === "chat";
-    const noHashYet = !window.location.hash || window.location.hash === "#";
-    if (sameChat || noHashYet) window.history.replaceState(null, "", target);
-    else window.history.pushState(null, "", target);
-  }, [view, chatSessionId]);
+    if (chatSessionId) storeChat(chatSessionId);
+  }, [chatSessionId]);
+  const signOutAndForget = () => {
+    storeChat(null);
+    signOut();
+  };
 
-  // URL → view (back / forward, or a hash typed by hand).
+  // view → URL. Shortening an old /chat/<id> link replaces the entry; any other change adds one (back button).
   useEffect(() => {
-    const onHash = () => {
-      const r = parseHash(window.location.hash);
+    const target = pathFor(view);
+    if (window.location.pathname === target) return;
+    const sameChat = view === "chat" && parsePath(window.location.pathname).view === "chat";
+    if (sameChat) window.history.replaceState(null, "", target);
+    else window.history.pushState(null, "", target);
+  }, [view]);
+
+  // URL → view (browser back / forward).
+  useEffect(() => {
+    const onPopState = () => {
+      const r = parsePath(window.location.pathname);
       setView(r.view);
-      if (r.view === "chat") {
-        if (r.sessionId && r.sessionId !== chatSessionId) openChat({ resumeSessionId: r.sessionId });
-        else if (!chat) openChat({});
-      }
+      if (r.view === "chat" && !chat) openChat({ resumeSessionId: r.sessionId ?? storedChat() });
     };
-    // popstate also fires for a hash typed by hand, so hashchange is not needed (it would open the chat twice).
-    window.addEventListener("popstate", onHash);
-    return () => window.removeEventListener("popstate", onHash);
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
   });
 
   const ja = locale === "ja";
@@ -145,7 +177,7 @@ function Shell({ locale, setLocale }: { locale: "ja" | "en"; setLocale: (l: "ja"
           <button type="button" className="tab subtle" onClick={switchLocale} aria-label={ja ? "Switch to English" : "日本語に切り替え"}>
             {ja ? "EN" : "日本語"}
           </button>
-          <button type="button" className="tab subtle" onClick={signOut}>{ja ? "ログアウト" : "Sign out"}</button>
+          <button type="button" className="tab subtle" onClick={signOutAndForget}>{ja ? "ログアウト" : "Sign out"}</button>
         </div>
       </header>
       <main className={view !== "chat" ? "scroll" : undefined}>
@@ -167,6 +199,10 @@ function Shell({ locale, setLocale }: { locale: "ja" | "en"; setLocale: (l: "ja"
               orderItemId={chat.orderItemId}
               onNewChat={() => openChat({})}
               onSessionReady={setChatSessionId}
+              onResumeFailed={() => {
+                storeChat(null);
+                openChat({});
+              }}
             />
           </div>
         )}

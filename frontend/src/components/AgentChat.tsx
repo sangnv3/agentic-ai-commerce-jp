@@ -73,6 +73,7 @@ export function AgentChat({
   orderItemId,
   onNewChat,
   onSessionReady,
+  onResumeFailed,
 }: {
   locale?: "ja" | "en";
   resumeSessionId?: string;
@@ -81,6 +82,8 @@ export function AgentChat({
   onNewChat?: () => void;
   /** The conversation's id once known (kept in the URL so a reload reopens it). */
   onSessionReady?: (sessionId: string) => void;
+  /** resumeSessionId could not be loaded. */
+  onResumeFailed?: () => void;
 }) {
   const L = t[locale];
   const catalog = useCatalog();
@@ -102,7 +105,8 @@ export function AgentChat({
     (async () => {
       if (resumeSessionId) {
         const t = await apiFetch(`/api/agent/sessions/${resumeSessionId}/transcript`);
-        if (!t.ok) return setStartError(true);
+        // Gone, or another account's conversation (e.g. remembered from before a sign-out): start a new chat instead.
+        if (!t.ok) return onResumeFailed ? onResumeFailed() : setStartError(true);
         const { messages } = (await t.json()) as { messages: TranscriptMessage[] };
         chat.hydrate(messages, locale);
         started.current = true; // no greeting when continuing a conversation
